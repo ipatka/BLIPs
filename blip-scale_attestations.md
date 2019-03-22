@@ -45,19 +45,106 @@ The DataHash is sufficiently obfuscated to be pre-image attack resistant.
 ## Specification
 <!--The technical specification should describe the syntax and semantics of any new feature. The specification should be detailed enough to allow competing, interoperable implementations for any of the current Bloom platforms.-->
 
-### BulkAttestationLogic.sol
-Introduce BulkAttestationLogic.sol contract to emit batched attestaions for attesters.
+### BatchAttestationLogic.sol
+Introduce BatchAttestationLogic.sol contract to emit batched attestations for attesters.
+```
+/**
+ * @title BatchAttestationLogic
+ * @notice AttestationLogic allows users to submit the root hash of a batch
+ *  attestation Merkle tree
+ */
+contract BatchAttestationLogic {
+  event BatchTraitAttested(
+    bytes32 rootHash
+    );
 
+  /**
+   * @notice Function for anyone to submit the root hash of a batch attestation merkle tree
+   * @param _dataHash Root hash of batch merkle tree
+   */
+  function batchAttest(
+    bytes32 _dataHash
+  ) external {
+    emit BatchTraitAttested(_dataHash);
+  }
+}
+```
+
+### Layer 2 Hash V2
+The full change is available in the PR here: https://github.com/hellobloom/specs/pull/2
+
+The layer 2 hash of a Selective Disclosure Merkle Tree can be formed using the combined hash of the Subject's signature and the Attester's signature. These signatures take the place of on chain signature validation logic. The new layer 2 hash can be structured into a large Batch Attestation Merkle Tree. The root hash of that tree is published on chain. Users can prove inclusion of their layer 2 hash in the larger tree.
+
+
+![](Selective_Disclosure_Merkle_Tree_V2-6-5e8f0ef0-78d6-47cc-9004-1fe3710f1a63.png)
+
+    const layer2Hash = hashMessage(
+        orderedStringify({
+          attesterSig: attesterSig,
+          subjectSig: subjectSig
+        })
+      )
+
+Layer 2 hashes are sorted alphabetically, combined into a batch Merkle Tree then the root of the batch Merkle tree is emitted on chain. Batch Merkle trees are published regularly (every 4 blocks).
+
+![](Batch_Attestation_Merkle_Tree-9568154b-d9b8-41fd-a0e8-da57e04afb27.png)
 
 ## Rationale
 <!--The rationale fleshes out the specification by describing what motivated the design and why particular design decisions were made. It should describe alternate designs that were considered and related work, e.g. how the feature is supported in other languages. The rationale may also provide evidence of consensus within the community, and should discuss important objections or concerns raised during discussion.-->
+
+## Attester Signature
+The attester used to signal their approval of the attestation for a specific subject by submitting the transaction on chain with the subject address in the attestation function arguments. Now that the subject is in the Merkle Tree, not on chain, the attester needs to sign an additional message approving of the specific data hash associated with the specific subject. This signature is included in the Merkle Tree and must be checked by verifiers to make sure shared data is valid.
+
+## Subject Signature
+The subject signature has remained the same as the previous implementation in order to minimize the changes needed to the specification implementations. The subject signature used to be validated in the smart contract. Now it is validated off chain and included in the Merkle Tree. Verifiers will need to ensure the subject signature is valid when they receive shared data.
+
+```
+export const getFormattedTypedDataAttestationRequest = (
+  contractAddress: string,
+  chainId: number,
+  dataHash: string,
+  requestNonce: string
+): IFormattedTypedData => {
+  return {
+    types: {
+      EIP712Domain: [
+        {name: 'name', type: 'string'},
+        {name: 'version', type: 'string'},
+        {name: 'chainId', type: 'uint256'},
+        {name: 'verifyingContract', type: 'address'},
+      ],
+      AttestationRequest: [
+        {name: 'dataHash', type: 'bytes32'},
+        {name: 'nonce', type: 'bytes32'},
+      ],
+    },
+    primaryType: 'AttestationRequest',
+    domain: {
+      name: 'Bloom Attestation Logic',
+      version: '2',
+      chainId: chainId,
+      verifyingContract: contractAddress,
+    },
+    message: {
+      dataHash: dataHash,
+      nonce: requestNonce,
+    },
+  }
+}
+```
+
 
 ## Backwards Compatibility
 <!--All BLIPs that introduce backwards incompatibilities must include a section describing these incompatibilities and their severity. The BLIP must explain how the author proposes to deal with these incompatibilities. BLIP submissions without a sufficient backwards compatibility treatise may be rejected outright.-->
 This change involves deploying a new smart contract for submitting attestations. Share Kit endpoint validation logic needs to be updated to work with the new contract. The current contract can still be used for submitting individual attestations and revocations.
 
+The new Selective Disclosure Merkle Tree is intended to be backwards compatible with the previous one. The only difference is how the Layer 2 Hash is formed.
+
+The subject signature is the same for both implementations of the Selective Disclosure Merkle Tree. This way the subject does not have to care if they are giving permission to be part of a batch of attestations or an individual attestation.
+
 ## Test Cases
 <!--Test cases for an implementation are mandatory for BLIPs that are affecting governance changes. Other BLIPs can choose to include links to test cases if applicable.-->
+Test cases will be covered in the test for `HashingLogic.ts` in `Attestations-Lib`.
 
 ## Implementation
 <!--The implementations must be completed before any BLIP is given status "Final", but it need not be completed before the BLIP is accepted. While there is merit to the approach of reaching consensus on the specification and rationale before writing code, the principle of "rough consensus and running code" is still useful when it comes to resolving many discussions of API details.-->
